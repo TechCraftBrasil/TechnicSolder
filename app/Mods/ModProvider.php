@@ -12,9 +12,26 @@ abstract class ModProvider
 {
     abstract public static function name() : string;
     abstract protected static function apiUrl() : string;
-    abstract protected static function apiHeaders() : array;
     abstract public static function search(string $query, int $page = 1) : object;
     abstract public static function mod(string $modId) : ImportedModData;
+    
+    
+    protected static function apiHeaders() : array
+    {
+        return array(
+            "User-Agent: TechnicPack/TechnicSolder/" . SOLDER_VERSION
+        );
+    }
+
+    protected static function zipFolder() : string
+    {
+        return "mods";
+    }
+
+    protected static function useRawVersion() : bool
+    {
+        return false;
+    }
 
     private static function installVersion(int $modId, string $slug, ImportedModData $modData, string $version)
     {
@@ -34,40 +51,50 @@ abstract class ModProvider
         curl_close($curl_h);
         fclose($tmpFile);
 
-        // Open the downloaded mod zip file
-        $zip = new ZipArchive();
-        $res = $zip->open($tmpFileName, ZipArchive::RDONLY);
-        if ($res === false) {
-            unlink($tmpFileName);
-            return ["mod_corrupt" => "Unable to open mod file for version $version, its likely corrupt"];
-        }
+        if (!static::useRawVersion()) {
+            // Open the downloaded mod zip file
+            $zip = new ZipArchive();
+            $res = $zip->open($tmpFileName, ZipArchive::RDONLY);
+            if ($res === false) {
+                unlink($tmpFileName);
+                return ["mod_corrupt" => "Unable to open mod file for version $version, its likely corrupt"];
+            }
 
-        $version = "";
+            $version = "";
 
-        // Try load the version from forge
-        $forgeData = $zip->getFromName('mcmod.info');
-        if ($forgeData !== false) {
-            $version = json_decode($forgeData)[0]->version;
-        }
+            // Try load the version from forge
+            $forgeData = $zip->getFromName('mcmod.info');
+            if ($forgeData !== false) {
+                $tmpData = json_decode($forgeData)[0];
+                $version = "$tmpData->mcversion-$tmpData->version";
+            }
 
-        // Try load the version from fabric
-        $fabricData = $zip->getFromName('fabric.mod.json');
-        if ($fabricData !== false) {
-            $version = json_decode($fabricData)->version;
-        }
+            // Try load the version from fabric
+            $fabricData = $zip->getFromName('fabric.mod.json');
+            if ($fabricData !== false) {
+                $tmpData = json_decode($fabricData);
+                $mcVersion = "";
+                if (property_exists($tmpData, "depends") && property_exists($tmpData->depends, "minecraft")) {
+                    $mcVersion = $tmpData->depends->minecraft;
+                    $mcVersion = preg_replace("/[^0-9\.]/i", "", explode('-', $mcVersion)[0]); // Clean the depend version
+                    $mcVersion = "$mcVersion-";
+                }
+                $version = $mcVersion.$tmpData->version;
+            }
 
-        // Try load the version from rift
-        $riftData = $zip->getFromName('riftmod.json');
-        if ($riftData !== false) {
-            $version = json_decode($riftData)->version;
-        }
+            // Try load the version from rift
+            $riftData = $zip->getFromName('riftmod.json');
+            if ($riftData !== false) {
+                $version = json_decode($riftData)->version;
+            }
 
-        $zip->close();
+            $zip->close();
 
-        // Make sure we have been given a version
-        if (empty($version)) {
-            unlink($tmpFileName);
-            return ["version_missing" => "Unable to detect version number for $version"];
+            // Make sure we have been given a version
+            if (empty($version)) {
+                unlink($tmpFileName);
+                return ["version_missing" => "Unable to detect version number for $version"];
+            }
         }
 
         // Check if the version already exists for the mod
@@ -95,7 +122,7 @@ abstract class ModProvider
         // Create the final mod zip
         $zip = new ZipArchive();
         $zip->open($finalPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-        $zip->addFile($tmpFileName, "mods/" . $fileName);
+        $zip->addFile($tmpFileName, static::zipFolder() . "/" . $fileName);
         $zip->close();
 
         // Add the version to the db
@@ -142,7 +169,7 @@ abstract class ModProvider
         return $response;
     }
 
-    protected static function request(string $url)
+    protected static function request(string $url, bool $skipJsonDecode = false)
     {
         $curl_h = curl_init(static::apiUrl() . $url);
 
@@ -152,6 +179,10 @@ abstract class ModProvider
         curl_setopt($curl_h, CURLOPT_RETURNTRANSFER, true);
 
         $response = curl_exec($curl_h);
-        return json_decode($response);
+        if ($skipJsonDecode) {
+            return $response;
+        } else {
+            return json_decode($response);
+        }
     }
 }

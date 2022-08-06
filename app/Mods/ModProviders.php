@@ -7,7 +7,9 @@ class ModProviders
     public static function providers()
     {
         $providers = array(
-            'modrinth' => \App\Mods\Providers\Modrinth::class
+            'modrinth' => \App\Mods\Providers\Modrinth::class,
+            'fabric' => \App\Mods\Providers\Fabric::class,
+            'forge' => \App\Mods\Providers\Forge::class
         );
 
         // If we have a CurseForge api key set add it to the providers list
